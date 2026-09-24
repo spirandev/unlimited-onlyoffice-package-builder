@@ -118,9 +118,19 @@ build_oo_binaries() {
   # work/build_tools e são reaproveitados.
   rm -f "${WORK_DIR}/build_tools/tools/linux/packages_complete"
 
+  # Contexto vazio: o ADD . do Dockerfile não é usado (work/ é montado no
+  # docker run) e, a partir da segunda execução, work/build_tools tem o sysroot
+  # baixado pelo container, com diretórios do root que o docker build não lê.
+  # O /build_tools da imagem fica vazio, o que não importa: o docker run usa
+  # -w /work/build_tools/tools/linux. O diretório temporário é apagado nos dois
+  # caminhos (sucesso e falha).
   log "gerando a imagem do build_tools"
-  docker build --tag "ems-oo-build-tools:${UPSTREAM_TAG}" "${WORK_DIR}/build_tools" \
-    || die "falha no docker build do build_tools"
+  local empty_ctx
+  empty_ctx="$(mktemp -d)"
+  docker build --tag "ems-oo-build-tools:${UPSTREAM_TAG}" \
+    -f "${WORK_DIR}/build_tools/Dockerfile" "${empty_ctx}" \
+    || { rmdir "${empty_ctx}"; die "falha no docker build do build_tools"; }
+  rmdir "${empty_ctx}"
 
   # work/ é montado inteiro: os repositórios que o build_tools clona (core,
   # sdkjs, ...) ficam ao lado de server/ e web-apps/ e persistem entre execuções.
