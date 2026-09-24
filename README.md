@@ -1,56 +1,83 @@
-# unlimited-onlyoffice-package-builder
+# onlyoffice-ems-builder
 
-Unlimited OnlyOffice Package Builder let's you build OnlyOffice with no limits and package it (currently only deb packages are supported).
+Compila o **ONLYOFFICE Document Server Community** a partir do código-fonte oficial, com a **edição mobile liberada**,
+e gera um pacote `.deb` e uma imagem Docker que substitui a oficial (`onlyoffice/documentserver`).
 
-## Requisites
+É um fork do [btactic-oo/unlimited-onlyoffice-package-builder](https://github.com/btactic-oo/unlimited-onlyoffice-package-builder),
+revisado e adaptado. Não é um build oficial da ONLYOFFICE: problemas devem ser reproduzidos na imagem oficial antes de
+serem reportados a eles.
 
-### Introduction
+## O que muda em relação ao oficial
 
-In order to ease the OnlyOffice deb build this build method uses Docker under the hood. You will find instructions on how to setup your build user to use Docker. This only needs to be done once. These Docker instructions are meant for Ubuntu 20.04 but any other generic Docker setup instructions for your OS should be ok.
+| Trava do Community | Situação | Como |
+|---|---|---|
+| Edição nos editores mobile | **Liberada** | [`patches/web-apps/0001-enable-mobile-edit.patch`](patches/web-apps/0001-enable-mobile-edit.patch): `isSupportEditFeature()` retorna `true` (3 linhas) |
+| 20 conexões simultâneas | Já removida pelo upstream a partir da **9.4.0** | Sem patch. O build **falha** se uma versão futura voltar a limitar (`check_no_connection_limit` em `lib/common.sh`) |
 
-Be aware of RHEL 8 based distributions. Search for a [docker-ce howto](https://computingforgeeks.com/install-docker-and-docker-compose-on-rhel-8-centos-8/). Trying to install docker package directly installs *podman* and *buildah* which **do not work exactly as docker-ce** although they seem to be advertised as such.
+Mais nada é alterado: logo, marca, créditos, configuração, fontes e o restante do código são os oficiais.
 
-### Docker setup
+## Diferenças em relação ao builder do btactic
 
-*Note: The commands for this Docker setup need to be run as either root user or a user that it's part of the sudo group, usually the admin user.*
+- **Origem do código:** tudo é clonado de `github.com/ONLYOFFICE` na tag oficial, e o `HEAD` é conferido contra o SHA
+  da tag no upstream. O original clonava forks do btactic e usava a tag desses forks, que podia apontar para outro
+  commit.
+- **Patches como arquivos** em `patches/<repo>/`, aplicados com `git apply --check`/`git apply`. O original fazia
+  cherry-pick de commits de repositórios de terceiros.
+- **Sem o patch de conexões** (desnecessário na 9.4) e **sem o Admin Panel**. O código do painel fica no repositório
+  `ONLYOFFICE/server-admin-panel`, que não é público, e o patch do btactic só ligava o empacotamento dele.
+- **Compatível com o `build_tools` 9.4**, que prepara python/Qt/sysroot no `automate.py` e não mais no Dockerfile. O
+  comando do original não funciona nessa versão.
+- **Build retomável:** tudo fica em `work/`, que é mantido entre execuções.
+- **Imagem Docker:** gerada com o `Dockerfile` oficial do `ONLYOFFICE/Docker-DocumentServer` na mesma tag, sem
+  alterações, instalando o nosso `.deb`.
+- O workflow de GitHub Actions do original foi removido, porque o build é feito localmente. O workflow também apagava
+  todas as imagens Docker do host.
 
-#### Install docker prerequisites
+## Requisitos
 
+- Linux x86_64 com Docker e o usuário no grupo `docker` (não precisa de `sudo`).
+- **16 GB de RAM** livres (ou 8 GB + 8 GB de swap) e **60 GB de disco** livres.
+- `git`, `curl` e `python3` no host.
+- Conexão com a internet: o `build_tools` baixa dependências (Qt, sysroot, v8, boost, etc.), igual ao build oficial.
+- Tempo: várias horas com 4 CPUs. Rode dentro de `tmux`/`screen`.
+
+## Uso
+
+A versão base fica no arquivo [`VERSION`](VERSION). Para descobrir o `BUILD_NUMBER` de uma versão oficial:
+`apt-cache show onlyoffice-documentserver` (repositório oficial) → `Version: 9.4.0-129` → `BUILD_NUMBER=129`.
+
+```bash
+# 1. binários + pacote .deb (em work/document-server-package/deb/)
+./onlyoffice-package-builder.sh
+
+# 2. imagem Docker ems-documentserver:<versão>.<build>-ems.<revisão>
+./docker/build-image.sh
+
+# 3. teste rápido (healthcheck + edição mobile no bundle)
+./tests/smoke.sh
 ```
-sudo apt-get update
-sudo apt-get remove docker docker-engine docker.io
-sudo apt-get install linux-image-extra-$(uname -r) linux-image-extra-virtual
-sudo apt-get install apt-transport-https ca-certificates curl software-properties-common
-```
-#### Set up docker's apt repository
 
-```
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+Se o build falhar por rede ou disco, basta rodar de novo: o que já foi baixado e compilado em `work/` é
+reaproveitado. `--clean` recomeça do zero. `--binaries-only` e `--deb-only` executam só uma das etapas.
 
-sudo tee /etc/apt/sources.list.d/docker.list <<EOM
-deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable
-EOM
+Os roteiros manuais de validação estão em [`tests/mobile.md`](tests/mobile.md) e
+[`tests/connections.md`](tests/connections.md).
 
-sudo apt-get update
-```
+## Atualizar para uma nova versão oficial
 
-#### Install docker
+1. Atualizar `PRODUCT_VERSION`/`BUILD_NUMBER` em `VERSION` e voltar `EMS_REVISION` para `1`.
+2. `./onlyoffice-package-builder.sh`. O `work/` é limpo automaticamente ao trocar de versão.
+   - Se um patch não aplicar, o build para e informa qual. Ajuste o arquivo em `patches/` na nova tag.
+   - Se o upstream voltar a limitar conexões, o build para em `check_no_connection_limit`.
+3. `./docker/build-image.sh`, `./tests/smoke.sh` e os roteiros manuais.
 
-```
-sudo apt-get install docker-ce
-```
+Correções de segurança publicadas pela ONLYOFFICE devem entrar aqui com a mesma prioridade da imagem oficial.
 
-## How to build example
+## Licença
 
-```
-mkdir ~/build-onlyoffice-test-01
-cd ~/build-onlyoffice-test-01
-git clone https://github.com/btactic-oo/unlimited-onlyoffice-package-builder
-cd unlimited-onlyoffice-package-builder
-./onlyoffice-package-builder.sh --product-version=8.0.1 --build-number=31 --unlimited-organization=btactic-oo --tag-suffix=-btactic --debian-package-suffix=-btactic
-```
-
-## More technical docs
-
-- [README-BUILD-NEWER-VERSIONS.md](README-BUILD-NEWER-VERSIONS.md)
-- [development_logs](development_logs/)
+- O ONLYOFFICE Document Server é licenciado sob a **AGPL v3** com os termos adicionais da §7 (logo e marca). A imagem
+  gerada preserva logo e créditos da ONLYOFFICE. Por causa da §13, este repositório (com os patches) fica público para
+  quem usa o serviço pela rede.
+- Os scripts deste builder são **GPL v3** ([LICENSE](LICENSE)), herdados do btactic. Os copyrights originais foram
+  mantidos nos arquivos.
+- `development_logs/` são os registros originais do btactic, mantidos como referência histórica.
