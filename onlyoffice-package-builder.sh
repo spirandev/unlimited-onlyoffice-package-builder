@@ -1,9 +1,10 @@
 #!/bin/bash
 
 #######################################################################
-# OnlyOffice Package Builder
+# OnlyOffice Package Builder (fork EMS)
 
 # Copyright (C) 2024 BTACTIC, SCCL
+# Copyright (C) 2026 Pandora Tecnologia (alterações do fork EMS)
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,33 +20,46 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #######################################################################
 
+# Diferenças em relação ao builder original do btactic:
+# - todo código é clonado de github.com/ONLYOFFICE e o HEAD é conferido
+#   contra a tag oficial (nada vem de forks de terceiros);
+# - as alterações são arquivos em patches/<repo>/, aplicados com git apply;
+# - o build_tools da 9.4 prepara python/Qt/sysroot no automate.py (não mais
+#   no Dockerfile), por isso o build roda por ele;
+# - tudo fica em work/, que sobrevive entre execuções para retomar um build
+#   que falhou por rede ou disco.
+
+set -o pipefail
+
+source "$(dirname "$0")/lib/common.sh"
+
 usage() {
 cat <<EOF
 
-  $0
-  Copyright BTACTIC, SCCL
-  Licensed under the GNU PUBLIC LICENSE 3.0
+  $0 [opções]
 
-  Usage: $0 --product-version=PRODUCT_VERSION --build-number=BUILD_NUMBER --unlimited-organization=ORGANIZATION --tag-suffix=-TAG_SUFFIX --debian-package-suffix=-DEBIAN_PACKAGE_SUFFIX
-  Example: $0 --product-version=7.4.1 --build-number=36 --unlimited-organization=btactic-oo --tag-suffix=-btactic --debian-package-suffix=-btactic
+  Compila o ONLYOFFICE Document Server a partir do código oficial com os
+  patches de patches/ e gera o pacote .deb. Versão padrão: arquivo VERSION.
 
-  For Github actions you might want to either build only binaries or build only deb so that it's easier to prune containers
-  Example: $0 --product-version=7.4.1 --build-number=36 --unlimited-organization=btactic-oo --tag-suffix=-btactic --debian-package-suffix=-btactic --binaries-only
-  Example: $0 --product-version=7.4.1 --build-number=36 --unlimited-organization=btactic-oo --tag-suffix=-btactic --debian-package-suffix=-btactic --deb-only
+  Opções:
+    --product-version=X.Y.Z       sobrescreve PRODUCT_VERSION do VERSION
+    --build-number=N              sobrescreve BUILD_NUMBER do VERSION
+    --debian-package-suffix=-SUF  sufixo do pacote (padrão: -ems)
+    --binaries-only               só compila (build_tools)
+    --deb-only                    só empacota (exige binários já compilados)
+    --clean                       apaga work/ antes de começar
+
+  Exemplo: $0
+           $0 --product-version=9.4.0 --build-number=129
 
 EOF
-
 }
 
 BINARIES_ONLY="false"
 DEB_ONLY="false"
+CLEAN="false"
+DEBIAN_PACKAGE_SUFFIX="-ems"
 
-UPSTREAM_ORGANIZATION="ONLYOFFICE"
-
-SERVER_CUSTOM_COMMITS="c9de34cefddb32bf08c39dd1b7372ae7b2f082d7"
-WEB_APPS_CUSTOM_COMMITS="140ef6d1d687532dcb03b05912838b8b4cf161a3"
-
-# Check the arguments.
 for option in "$@"; do
   case "$option" in
     -h | --help)
@@ -53,19 +67,13 @@ for option in "$@"; do
       exit 0
     ;;
     --product-version=*)
-      PRODUCT_VERSION=`echo "$option" | sed 's/--product-version=//'`
+      PRODUCT_VERSION="${option#--product-version=}"
     ;;
     --build-number=*)
-      BUILD_NUMBER=`echo "$option" | sed 's/--build-number=//'`
-    ;;
-    --unlimited-organization=*)
-      UNLIMITED_ORGANIZATION=`echo "$option" | sed 's/--unlimited-organization=//'`
-    ;;
-    --tag-suffix=*)
-      TAG_SUFFIX=`echo "$option" | sed 's/--tag-suffix=//'`
+      BUILD_NUMBER="${option#--build-number=}"
     ;;
     --debian-package-suffix=*)
-      DEBIAN_PACKAGE_SUFFIX=`echo "$option" | sed 's/--debian-package-suffix=//'`
+      DEBIAN_PACKAGE_SUFFIX="${option#--debian-package-suffix=}"
     ;;
     --binaries-only)
       BINARIES_ONLY="true"
@@ -73,190 +81,102 @@ for option in "$@"; do
     --deb-only)
       DEB_ONLY="true"
     ;;
+    --clean)
+      CLEAN="true"
+    ;;
+    *)
+      usage
+      die "opção desconhecida: $option"
+    ;;
   esac
 done
 
-BUILD_BINARIES="true"
-BUILD_DEB="true"
+load_version
 
-if [ "$EUID" -ne 0 ]
-  then echo "Please run as root"
-  exit 1
-fi
+[ "${BINARIES_ONLY}" == "true" ] && [ "${DEB_ONLY}" == "true" ] \
+  && die "--binaries-only e --deb-only são excludentes"
 
-if [ ${BINARIES_ONLY} == "true" ] ; then
-  BUILD_BINARIES="true"
-  BUILD_DEB="false"
-fi
+docker info > /dev/null 2>&1 || die "sem acesso ao Docker (usuário precisa estar no grupo docker)"
 
-if [ ${DEB_ONLY} == "true" ] ; then
-  BUILD_BINARIES="false"
-  BUILD_DEB="true"
-fi
+log "versão ${PRODUCT_VERSION} build ${BUILD_NUMBER} (tag ${UPSTREAM_TAG}), sufixo ${DEBIAN_PACKAGE_SUFFIX}"
 
-if [ "x${PRODUCT_VERSION}" == "x" ] ; then
-    cat << EOF
-    --product-version option must be informed.
-    Aborting...
-EOF
-    usage
-    exit 1
-fi
-
-if [ "x${BUILD_NUMBER}" == "x" ] ; then
-    cat << EOF
-    --build-number option must be informed.
-    Aborting...
-EOF
-    usage
-    exit 1
-fi
-
-if [ "x${UNLIMITED_ORGANIZATION}" == "x" ] ; then
-    cat << EOF
-    --unlimited-organization option must be informed.
-    Aborting...
-EOF
-    usage
-    exit 1
-fi
-
-if [ "x${TAG_SUFFIX}" == "x" ] ; then
-    cat << EOF
-    --tag-suffix option must be informed.
-    Aborting...
-EOF
-    usage
-    exit 1
-fi
-
-if [ "x${DEBIAN_PACKAGE_SUFFIX}" == "x" ] ; then
-    cat << EOF
-    --debian-package-suffix option must be informed.
-    Aborting...
-EOF
-    usage
-    exit 1
-fi
-
-PRUNE_DOCKER_CONTAINERS_ACTION="false"
-if [ "x${PRUNE_DOCKER_CONTAINERS}" != "x" ] ; then
-  if [ ${PRUNE_DOCKER_CONTAINERS} == "true" ] -o [ ${PRUNE_DOCKER_CONTAINERS} == "TRUE" ] ; then
-    PRUNE_DOCKER_CONTAINERS_ACTION="true"
-    cat << EOF
-    WARNING !
-    WARNING !
-    --prune-docker-containers has been set to true
-    This will erase all of your docker containers
-    after the binaries build.
-
-    Waiting for 30s so that you can CTRL+C
-EOF
-    sleep 30s
-  fi
-fi
-
-prepare_custom_repo() {
-
-  _REPO=$1
-  shift
-  _TAG=$1
-  shift
-  _UNLIMITED_ORGANIZATION=$1
-  shift
-  # Rest of arguments are commits to cherry-pick in order
-
-  git clone https://github.com/${_UNLIMITED_ORGANIZATION}/${_REPO}
-  cd ${_REPO}
-  git remote add upstream-origin https://github.com/${UPSTREAM_ORGANIZATION}/${_REPO}
-
-  git checkout master
-  git pull upstream-origin master
-  git fetch --all --tags
-  git checkout tags/${_TAG} -b ${_TAG}-custom
-
-  # Hard-code temp git user.name and user.email for this local cherry-picked commit
-  git config user.name 'CherryPick User'
-  git config user.email 'cherrypick@btacticoo.com'
-
-  while [ "$#" -gt 0 ]; do
-    _ncommit=$1
-    if ! git cherry-pick "${_ncommit}"; then
-      echo "Error: cherry-pick of commit ${_ncommit} failed in ${_REPO}" >&2
-      echo "Aborting!"
-      exit 3
-    fi
-    shift
-  done
-
-  # Force our changes
-  git tag --delete ${_TAG}
-  git tag -a "${_TAG}" -m "${_TAG}"
-
-  cd ..
-
-}
+[ "${CLEAN}" == "true" ] && wipe_work_dir
+prepare_work_dir
 
 build_oo_binaries() {
+  clone_official server "${UPSTREAM_TAG}"
+  clone_official web-apps "${UPSTREAM_TAG}"
+  clone_official build_tools "${UPSTREAM_TAG}"
 
-  _OUT_FOLDER=$1 # out
-  _PRODUCT_VERSION=$2 # 7.4.1
-  _BUILD_NUMBER=$3 # 36
-  _TAG_SUFFIX=$4 # -btactic
-  _UNLIMITED_ORGANIZATION=$5 # btactic-oo
+  check_no_connection_limit
+  apply_patches server
+  apply_patches web-apps
 
-  _UPSTREAM_TAG="v${_PRODUCT_VERSION}.${_BUILD_NUMBER}"
-  _UNLIMITED_ORGANIZATION_TAG="${_UPSTREAM_TAG}${_TAG_SUFFIX}"
+  # packages_complete marca que o deps.py instalou os pacotes do sistema. Os
+  # pacotes vivem no container (descartado a cada execução), então a marca é
+  # removida para que sejam reinstalados. python3, qt_build e sysroot ficam em
+  # work/build_tools e são reaproveitados.
+  rm -f "${WORK_DIR}/build_tools/tools/linux/packages_complete"
 
-  prepare_custom_repo "server" "${_UPSTREAM_TAG}" "${_UNLIMITED_ORGANIZATION}" ${SERVER_CUSTOM_COMMITS}
-  prepare_custom_repo "web-apps" "${_UPSTREAM_TAG}" "${_UNLIMITED_ORGANIZATION}" ${WEB_APPS_CUSTOM_COMMITS}
+  log "gerando a imagem do build_tools"
+  docker build --tag "ems-oo-build-tools:${UPSTREAM_TAG}" "${WORK_DIR}/build_tools" \
+    || die "falha no docker build do build_tools"
 
-  git clone \
-    --depth=1 \
-    --recursive \
-    --branch ${_UPSTREAM_TAG} \
-    https://github.com/${UPSTREAM_ORGANIZATION}/build_tools.git \
-    build_tools
-  # Ignore detached head warning
-  cd build_tools
-  mkdir ${_OUT_FOLDER}
-  docker build --tag onlyoffice-document-editors-builder .
-  docker run -e BRANCH=tags/${_UPSTREAM_TAG} -e PRODUCT_VERSION=${_PRODUCT_VERSION} -e BUILD_NUMBER=${_BUILD_NUMBER} -e NODE_ENV='production' -v $(pwd)/${_OUT_FOLDER}:/build_tools/out -v $(pwd)/../server:/server -v $(pwd)/../web-apps:/web-apps onlyoffice-document-editors-builder /bin/bash -c '\
-    ./tools/linux/python3/bin/python3 ./configure.py --sysroot "1" --clean "0" --update-light "1" --branch '"${BRANCH}"' --update "1" --module "server" --qt-dir "$(pwd)/tools/linux/qt_build/Qt-5.9.9" && \
-    ./tools/linux/python3/bin/python3 ./make.py'
-  cd ..
+  # work/ é montado inteiro: os repositórios que o build_tools clona (core,
+  # sdkjs, ...) ficam ao lado de server/ e web-apps/ e persistem entre execuções.
+  # O container roda como root sobre repositórios do usuário: safe.directory
+  # evita a recusa do git por "dubious ownership".
+  log "compilando (módulo server). Isso leva horas."
+  docker run --rm \
+    -e PRODUCT_VERSION="${PRODUCT_VERSION}" \
+    -e BUILD_NUMBER="${BUILD_NUMBER}" \
+    -e NODE_ENV='production' \
+    -v "${WORK_DIR}:/work" \
+    -w /work/build_tools/tools/linux \
+    "ems-oo-build-tools:${UPSTREAM_TAG}" \
+    /bin/bash -c "git config --global --add safe.directory '*' 2>/dev/null || true; \
+      python3 ./automate.py server --branch=tags/${UPSTREAM_TAG} --update-light=1 --clean=0" \
+    || die "falha no build_tools"
 
+  [ -d "${WORK_DIR}/build_tools/out/linux_64/onlyoffice/documentserver" ] \
+    || die "build terminou sem gerar out/linux_64/onlyoffice/documentserver"
+  log "binários prontos em work/build_tools/out"
 }
 
-if [ "${BUILD_BINARIES}" == "true" ] ; then
-  build_oo_binaries "out" "${PRODUCT_VERSION}" "${BUILD_NUMBER}" "${TAG_SUFFIX}" "${UNLIMITED_ORGANIZATION}"
-  build_oo_binaries_exit_value=$?
+build_oo_deb() {
+  [ -d "${WORK_DIR}/build_tools/out/linux_64/onlyoffice/documentserver" ] \
+    || die "binários não encontrados; rode sem --deb-only primeiro"
+
+  clone_official document-server-package "${UPSTREAM_TAG}" --recurse-submodules
+  apply_patches document-server-package
+
+  log "gerando a imagem do empacotador"
+  docker build --tag ems-oo-deb-builder -f "${BUILDER_ROOT}/deb_build/Dockerfile-manual-debian-13" \
+    "${BUILDER_ROOT}/deb_build" || die "falha no docker build do empacotador"
+
+  docker run --rm \
+    --env PRODUCT_VERSION="${PRODUCT_VERSION}" \
+    --env BUILD_NUMBER="${BUILD_NUMBER}" \
+    --env DEBIAN_PACKAGE_SUFFIX="${DEBIAN_PACKAGE_SUFFIX}" \
+    -v "${BUILDER_ROOT}/deb_build:/usr/local/unlimited-onlyoffice-package-builder:ro" \
+    -v "${WORK_DIR}/build_tools:/root/build_tools:ro" \
+    -v "${WORK_DIR}/document-server-package:/root/document-server-package" \
+    ems-oo-deb-builder \
+    /bin/bash -c "git config --global --add safe.directory '*' 2>/dev/null || true; \
+      /usr/local/unlimited-onlyoffice-package-builder/onlyoffice-deb-builder.sh" \
+    || die "falha ao gerar o .deb"
+
+  local _deb
+  _deb="$(find "${WORK_DIR}/document-server-package/deb" -maxdepth 1 \
+    -name "onlyoffice-documentserver_${PRODUCT_VERSION}-${BUILD_NUMBER}${DEBIAN_PACKAGE_SUFFIX}_amd64.deb" | head -n1)"
+  [ -n "${_deb}" ] || die ".deb não encontrado em work/document-server-package/deb"
+  log "pacote gerado: ${_deb}"
+}
+
+if [ "${DEB_ONLY}" != "true" ]; then
+  build_oo_binaries
 fi
 
-# Simulate that binaries build went ok
-# when we only want to make the deb
-if [ ${DEB_ONLY} == "true" ] ; then
-  build_oo_binaries_exit_value=0
-fi
-
-if [ "${BUILD_DEB}" == "true" ] ; then
-  if [ ${build_oo_binaries_exit_value} -eq 0 ] ; then
-    cd deb_build
-    docker build --tag onlyoffice-deb-builder . -f Dockerfile-manual-debian-13
-    docker run \
-      --env PRODUCT_VERSION=${PRODUCT_VERSION} \
-      --env BUILD_NUMBER=${BUILD_NUMBER} \
-      --env TAG_SUFFIX=${TAG_SUFFIX} \
-      --env UNLIMITED_ORGANIZATION=${UNLIMITED_ORGANIZATION} \
-      --env DEBIAN_PACKAGE_SUFFIX=${DEBIAN_PACKAGE_SUFFIX} \
-      -v $(pwd):/usr/local/unlimited-onlyoffice-package-builder:ro \
-      -v $(pwd):/root:rw \
-      -v $(pwd)/../build_tools:/root/build_tools:ro \
-      onlyoffice-deb-builder /bin/bash -c "/usr/local/unlimited-onlyoffice-package-builder/onlyoffice-deb-builder.sh --product-version ${PRODUCT_VERSION} --build-number ${BUILD_NUMBER} --tag-suffix ${TAG_SUFFIX} --unlimited-organization ${UNLIMITED_ORGANIZATION} --debian-package-suffix ${DEBIAN_PACKAGE_SUFFIX}"
-    cd ..
-  else
-    echo "Binaries build failed!"
-    echo "Aborting... !"
-    exit 1
-  fi
+if [ "${BINARIES_ONLY}" != "true" ]; then
+  build_oo_deb
 fi

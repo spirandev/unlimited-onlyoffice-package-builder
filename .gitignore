@@ -1,2 +1,5 @@
+# Tudo que é clonado ou gerado durante o build (repositórios oficiais, binários, .deb).
+work/
+# Caminhos usados pelo builder original do btactic.
 build_tools/
 deb_build/document-server-package/
