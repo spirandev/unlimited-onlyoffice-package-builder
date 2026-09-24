@@ -135,8 +135,12 @@ build_oo_binaries() {
 
   # work/ é montado inteiro: os repositórios que o build_tools clona (core,
   # sdkjs, ...) ficam ao lado de server/ e web-apps/ e persistem entre execuções.
-  # O container roda como root sobre repositórios do usuário: safe.directory
-  # evita a recusa do git por "dubious ownership".
+  # server/ e web-apps/ são clonados pelo usuário e o container roda como root,
+  # então o git do container os recusa por "dubious ownership". Isso é
+  # desejável: o build_tools não mexe nesses dois repositórios, que ficam
+  # exatamente no estado verificado por clone_official e com os patches
+  # aplicados. Por isso não há safe.directory='*' aqui (o git nem existe no
+  # container quando o comando começa; quem instala é o deps.py).
   # DEPOT_TOOLS_DIR absoluto: o v8_89.py chama ./depot_tools/fetch com caminho
   # relativo, e o depot_tools exporta esse caminho e
   # depois faz cd para dentro dele antes de rodar ./cipd, que então procura
@@ -162,7 +166,6 @@ build_oo_binaries() {
     -w /work/build_tools/tools/linux \
     "ems-oo-build-tools:${UPSTREAM_TAG}" \
     /bin/bash -c "printf '[safe]\\n\\tdirectory = /work/cache/depot_tools.git\\n[url \"/work/cache/depot_tools.git\"]\\n\\tinsteadOf = ${DEPOT_TOOLS_URL}\\n' >> /root/.gitconfig; \
-      git config --global --add safe.directory '*' 2>/dev/null || true; \
       python3 ./automate.py server --branch=tags/${UPSTREAM_TAG} --update-light=1 --clean=0" \
     || die "falha no build_tools"
 
