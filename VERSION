@@ -1,0 +1,7 @@
+# Versão oficial do ONLYOFFICE Document Server usada como base.
+# A tag git correspondente é v${PRODUCT_VERSION}.${BUILD_NUMBER} (ex.: v9.4.0.129).
+# BUILD_NUMBER vem do pacote oficial: apt-cache show onlyoffice-documentserver -> Version: 9.4.0-129
+PRODUCT_VERSION=9.4.0
+BUILD_NUMBER=129
+# Revisão do nosso fork para a mesma versão oficial (imagem: <versão>-ems.<EMS_REVISION>).
+EMS_REVISION=1
