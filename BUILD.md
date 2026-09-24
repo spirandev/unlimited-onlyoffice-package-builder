@@ -18,14 +18,14 @@ tmux new -s oo-build
 
 | Item | Mínimo | Recomendado | Observação |
 |---|---|---|---|
-| Sistema | Linux x86_64 nativo | Debian 12/13 ou Ubuntu 22.04/24.04 | macOS e Docker Desktop **não** servem: a geração da imagem usa `--network host` para ler o `.deb` de um servidor em `127.0.0.1` |
+| Sistema | Linux x86_64 nativo ou WSL2 | Debian 12/13 ou Ubuntu 22.04/24.04 | macOS e Docker Desktop **não** servem: a geração da imagem usa `--network host` para ler o `.deb` de um servidor em `127.0.0.1` |
 | CPU | 4 núcleos | 8 ou mais | O tempo de build cai quase linearmente com os núcleos |
 | RAM livre | 16 GB (ou 8 GB + 8 GB de swap) | 32 GB | Pouca memória derruba o compilador no meio do build (erro `Killed`/`signal 9`) |
 | Disco livre | 60 GB | 100 GB | Na partição onde fica o repositório (`work/`) **e** na do Docker (`/var/lib/docker`) |
 | Rede | estável | cabo | O build baixa vários GB (Qt, sysroot, v8/chromium, boost, npm) de GitHub, Google e npm |
 
-WSL2 com Docker Engine instalado **dentro** da distribuição Linux deve funcionar, mas não foi testado. Prefira Linux
-nativo.
+**Vai usar WSL2 no Windows?** Faça antes a [seção 1.1](#11-preparar-o-wsl2-windows). Sem ela, o WSL2 fica com metade
+da RAM do Windows e o build tende a morrer por falta de memória.
 
 Confira antes de começar:
 
@@ -34,6 +34,106 @@ nproc                       # núcleos
 free -g                     # RAM (coluna "disponível")
 df -h . /var/lib/docker     # disco livre
 ```
+
+### 1.1 Preparar o WSL2 (Windows)
+
+Só para quem vai compilar dentro do WSL2. Em Linux nativo, pule para a seção 2.
+
+**a) Distribuição.** Use Ubuntu 24.04, no PowerShell:
+
+```powershell
+wsl --update
+wsl --install -d Ubuntu-24.04
+wsl -l -v            # a coluna VERSION precisa ser 2
+```
+
+**b) Memória, CPU e swap.** Por padrão o WSL2 usa só 50% da RAM do Windows. Crie ou edite
+`%UserProfile%\.wslconfig` (por exemplo, `C:\Users\<você>\.wslconfig`):
+
+```ini
+[wsl2]
+# deixe uns 4-6 GB para o Windows; o build quer 16 GB ou mais
+memory=24GB
+# todos os núcleos (ou quase) para o build
+processors=12
+swap=16GB
+# não desligar a VM enquanto o build roda em segundo plano
+vmIdleTimeout=-1
+```
+
+Ajuste `memory` e `processors` para a sua máquina e aplique no PowerShell com `wsl --shutdown`. Reabra o Ubuntu e
+confira com `free -g` e `nproc`.
+
+**c) systemd**, para o Docker subir sozinho. Dentro do Ubuntu:
+
+```bash
+sudo tee /etc/wsl.conf > /dev/null <<'EOF'
+[boot]
+systemd=true
+EOF
+```
+
+Aplique com `wsl --shutdown` no PowerShell e reabra o Ubuntu. `systemctl is-system-running` deve responder `running`
+ou `degraded`.
+
+**d) Docker Engine dentro do Ubuntu, não o Docker Desktop.** Instale pela seção 2.2 normalmente. Se o Docker Desktop
+estiver instalado no Windows, **desative a integração com essa distribuição** (Docker Desktop → Settings → Resources →
+WSL integration). Senão o comando `docker` do Ubuntu passa a falar com o daemon do Desktop, e a geração da imagem
+(`--network host` + `127.0.0.1`) pode não enxergar o `.deb`. Confira com `docker info | grep -i "operating system"`:
+deve mostrar `Ubuntu`, não `Docker Desktop`.
+
+**e) Clone no sistema de arquivos do Linux (`~/`), nunca em `/mnt/c/...`.** Em `/mnt/c` o build fica muito mais lento,
+o Windows pode converter finais de linha para CRLF (o que quebra os scripts) e as permissões de arquivos de root não
+funcionam.
+
+```bash
+cd ~ && git clone https://github.com/spirandev/unlimited-onlyoffice-package-builder.git onlyoffice-ems-builder
+```
+
+Não clone pelo Git do Windows.
+
+**f) Disco.** O Ubuntu do WSL2 fica num disco virtual (`ext4.vhdx`), por padrão em `C:`. Ele **cresce e não encolhe
+sozinho**, então o `C:` precisa ter 60 GB ou mais livres. Para colocar a distribuição em outro drive antes de começar
+(PowerShell, versões recentes do WSL):
+
+```powershell
+wsl --shutdown
+wsl --manage Ubuntu-24.04 --move D:\WSL\Ubuntu-24.04
+```
+
+Depois do build, para devolver o espaço ao Windows: `wsl --manage Ubuntu-24.04 --set-sparse true`.
+
+**g) Não deixe o Windows dormir** durante o build (Configurações → Energia → Suspensão: Nunca), senão a VM do WSL
+pausa. Deixe o terminal do Ubuntu aberto. O `tmux` protege contra fechar a aba, mas não contra suspensão ou
+`wsl --shutdown`.
+
+**h) DNS.** Se o `docker pull`/`docker build` falhar com `lookup ... server misbehaving` ou `connection refused` na
+porta 53, fixe DNS no Docker:
+
+```bash
+echo '{ "dns": ["1.1.1.1", "8.8.8.8"] }' | sudo tee /etc/docker/daemon.json
+sudo systemctl restart docker
+```
+
+Se já existir um `/etc/docker/daemon.json` (por exemplo, com `data-root`), acrescente a chave `dns` no mesmo JSON.
+
+**i) Testar pelo Windows e pelo celular.** O smoke test roda inteiro dentro do WSL e não precisa disso. Para abrir
+o Document Server no navegador do Windows, `http://localhost:<porta>` funciona direto. Para o **teste no celular**
+([`tests/mobile.md`](tests/mobile.md)), o aparelho precisa alcançar o WSL pela rede local. O mais simples é o modo
+de rede espelhado (Windows 11 22H2 ou mais novo), acrescentando ao `.wslconfig`:
+
+```ini
+[wsl2]
+networkingMode=mirrored
+```
+
+Depois, `wsl --shutdown` e liberar a porta no firewall do Windows (PowerShell como administrador):
+
+```powershell
+New-NetFirewallRule -DisplayName "OnlyOffice teste" -Direction Inbound -Protocol TCP -LocalPort 8092 -Action Allow
+```
+
+O celular acessa então `http://<ip-do-windows-na-rede>:8092`. Remova a regra depois do teste.
 
 ## 2. Instalar as dependências
 
@@ -221,6 +321,10 @@ scp ems-documentserver_9.4.0.129-ems.1.tar.gz usuario@destino:
 # no destino:
 gunzip -c ems-documentserver_9.4.0.129-ems.1.tar.gz | docker load
 ```
+
+No WSL2, o arquivo gerado em `~/` aparece no Explorer do Windows em `\\wsl$\Ubuntu-24.04\home\<usuário>\`. Outra opção
+é salvar direto no Windows com `docker save ... | gzip > /mnt/c/Users/<você>/Downloads/ems-documentserver_....tar.gz`
+(gravar em `/mnt/c` é lento, mas só acontece uma vez).
 
 **Por registry:**
 
