@@ -43,6 +43,9 @@ Mais nada é alterado: logo, marca, créditos, configuração, fontes e o restan
 
 ## Uso
 
+O passo a passo completo, incluindo a preparação da máquina, as falhas comuns e como levar a imagem para outro host,
+está em **[BUILD.md](BUILD.md)**.
+
 A versão base fica no arquivo [`VERSION`](VERSION). Para descobrir o `BUILD_NUMBER` de uma versão oficial:
 `apt-cache show onlyoffice-documentserver` (repositório oficial) → `Version: 9.4.0-129` → `BUILD_NUMBER=129`.
 
