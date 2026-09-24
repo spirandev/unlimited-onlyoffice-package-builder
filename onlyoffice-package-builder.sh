@@ -111,6 +111,7 @@ build_oo_binaries() {
   check_no_connection_limit
   apply_patches server
   apply_patches web-apps
+  prepare_depot_tools
 
   # packages_complete marca que o deps.py instalou os pacotes do sistema. Os
   # pacotes vivem no container (descartado a cada execução), então a marca é
@@ -137,22 +138,31 @@ build_oo_binaries() {
   # O container roda como root sobre repositórios do usuário: safe.directory
   # evita a recusa do git por "dubious ownership".
   # DEPOT_TOOLS_DIR absoluto: o v8_89.py chama ./depot_tools/fetch com caminho
-  # relativo, e o depot_tools (master, sem versão fixa) exporta esse caminho e
+  # relativo, e o depot_tools exporta esse caminho e
   # depois faz cd para dentro dele antes de rodar ./cipd, que então procura
   # depot_tools/depot_tools/cipd_client_version.digests ("Platform linux-amd64
   # is not supported by CIPD client bootstrap"). Como todos os scripts usam
   # ${DEPOT_TOOLS_DIR:-...}, o valor fixado aqui vence. O caminho acompanha o
   # ponto de montagem /work abaixo: se ele mudar, ajuste os dois.
+  # depot_tools fixado: o /root/.gitconfig do container redireciona o git clone
+  # do depot_tools feito pelo v8_89.py para o espelho em work/cache (ver
+  # prepare_depot_tools em lib/common.sh), e DEPOT_TOOLS_UPDATE=0 impede o
+  # depot_tools de se atualizar sozinho. O arquivo é escrito com printf porque
+  # o git só é instalado depois, pelo deps.py. Precisa ser a config global
+  # (não GIT_CONFIG_*), porque o upload-pack do clone local não herda essas
+  # variáveis e recusaria o espelho, que é do usuário, por "dubious ownership".
   log "compilando (módulo server). Isso leva horas."
   docker run --rm \
     -e PRODUCT_VERSION="${PRODUCT_VERSION}" \
     -e BUILD_NUMBER="${BUILD_NUMBER}" \
     -e NODE_ENV='production' \
     -e DEPOT_TOOLS_DIR=/work/core/Common/3dParty/v8_89/depot_tools \
+    -e DEPOT_TOOLS_UPDATE=0 \
     -v "${WORK_DIR}:/work" \
     -w /work/build_tools/tools/linux \
     "ems-oo-build-tools:${UPSTREAM_TAG}" \
-    /bin/bash -c "git config --global --add safe.directory '*' 2>/dev/null || true; \
+    /bin/bash -c "printf '[safe]\\n\\tdirectory = /work/cache/depot_tools.git\\n[url \"/work/cache/depot_tools.git\"]\\n\\tinsteadOf = ${DEPOT_TOOLS_URL}\\n' >> /root/.gitconfig; \
+      git config --global --add safe.directory '*' 2>/dev/null || true; \
       python3 ./automate.py server --branch=tags/${UPSTREAM_TAG} --update-light=1 --clean=0" \
     || die "falha no build_tools"
 
