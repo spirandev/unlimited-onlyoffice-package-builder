@@ -305,6 +305,7 @@ disco.
 | `HEAD ... difere da tag oficial` | O `work/<repo>` foi alterado à mão ou está corrompido | `--clean` e rodar de novo |
 | `0001-enable-mobile-edit.patch não aplica` | Versão nova mudou o arquivo | Refazer o patch na nova tag (seção 8) |
 | `license.js voltou a limitar conexões` | A versão escolhida é anterior à 9.4.0, ou o upstream voltou a limitar | Usar 9.4.0 ou mais nova, ou criar um patch em `patches/server/` |
+| `Platform linux-amd64 is not supported by CIPD client bootstrap`, seguido de `client not configured; see 'gclient config'` | `DEPOT_TOOLS_DIR` relativo herdado pelo `cipd` do depot_tools (já corrigido no builder, que passa o caminho absoluto) | Verificar se o `docker run` do build_tools em `onlyoffice-package-builder.sh` ainda passa `-e DEPOT_TOOLS_DIR`; depois limpar só o v8 (`docker run --rm -v "$PWD/work:/w" ubuntu:24.04 rm -rf /w/core/Common/3dParty/v8_89`) e rodar de novo |
 | `sem acesso ao Docker` | Usuário fora do grupo `docker` | Passo 2.2 |
 | Erro no `apt-get install /tmp/onlyoffice-documentserver_...deb` durante a etapa 2 | Dependência do `.deb` (gerado em Debian 13) ausente no Ubuntu 24.04 da imagem | Anotar o pacote que falta e reportar; a correção é trocar a base de `deb_build/Dockerfile-manual-debian-13` para `ubuntu:24.04` |
 

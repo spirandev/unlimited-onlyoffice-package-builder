@@ -126,11 +126,19 @@ build_oo_binaries() {
   # sdkjs, ...) ficam ao lado de server/ e web-apps/ e persistem entre execuções.
   # O container roda como root sobre repositórios do usuário: safe.directory
   # evita a recusa do git por "dubious ownership".
+  # DEPOT_TOOLS_DIR absoluto: o v8_89.py chama ./depot_tools/fetch com caminho
+  # relativo, e o depot_tools (master, sem versão fixa) exporta esse caminho e
+  # depois faz cd para dentro dele antes de rodar ./cipd, que então procura
+  # depot_tools/depot_tools/cipd_client_version.digests ("Platform linux-amd64
+  # is not supported by CIPD client bootstrap"). Como todos os scripts usam
+  # ${DEPOT_TOOLS_DIR:-...}, o valor fixado aqui vence. O caminho acompanha o
+  # ponto de montagem /work abaixo: se ele mudar, ajuste os dois.
   log "compilando (módulo server). Isso leva horas."
   docker run --rm \
     -e PRODUCT_VERSION="${PRODUCT_VERSION}" \
     -e BUILD_NUMBER="${BUILD_NUMBER}" \
     -e NODE_ENV='production' \
+    -e DEPOT_TOOLS_DIR=/work/core/Common/3dParty/v8_89/depot_tools \
     -v "${WORK_DIR}:/work" \
     -w /work/build_tools/tools/linux \
     "ems-oo-build-tools:${UPSTREAM_TAG}" \
