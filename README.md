@@ -11,10 +11,34 @@ serem reportados a eles.
 
 | Trava do Community | Situação | Como |
 |---|---|---|
-| Edição nos editores mobile | **Liberada** | [`patches/web-apps/0001-enable-mobile-edit.patch`](patches/web-apps/0001-enable-mobile-edit.patch): `isSupportEditFeature()` retorna `true` (3 linhas) |
+| Edição no editor mobile de **documentos** | **Liberada, com interface** | [`mobile-ui/documenteditor/patch.jsx`](mobile-ui/documenteditor/patch.jsx) substitui o stub `lib/patch.jsx` |
+| Edição nos editores mobile de **apresentação** e **planilha** | **Só a permissão** | [`patches/web-apps/0001-enable-mobile-edit.patch`](patches/web-apps/0001-enable-mobile-edit.patch): `isSupportEditFeature()` retorna `true` |
 | 20 conexões simultâneas | Já removida pelo upstream a partir da **9.4.0** | Sem patch. O build **falha** se uma versão futura voltar a limitar (`check_no_connection_limit` em `lib/common.sh`) |
 
 Mais nada é alterado: logo, marca, créditos, configuração, fontes e o restante do código são os oficiais.
+
+### Edição mobile: permissão e interface
+
+No editor mobile (`type: "mobile"`), `apps/<editor>/mobile/src/lib/patch.jsx` é um ponto de extensão. A build comercial
+troca esse arquivo por um de repositório privado (`web-apps-mobile`). O Community traz um stub que nega a edição e não
+tem a interface. Isso acontece em duas camadas:
+
+- **Permissão:** `isSupportEditFeature()` libera `canEdit`. Sozinha, só faz aparecer o botão de lápis e o "OK" no
+  cabeçalho. Não aparecem Editar/Inserir nem desfazer/refazer, e o painel de edição não sabe o que está selecionado.
+  O `0001` faz só isso, e hoje vale para **apresentação e planilha**.
+- **Interface:** `mobile-ui/<editor>/patch.jsx` é o arquivo inteiro. Liga ao SDK as telas de edição que já são
+  públicas: botões da barra, seleção → painéis (`storeFocusObjects.intf`), fontes, estilos, modelos de tabela, estilos
+  de gráfico, cores do tema, comentários e menu de toque. Foi escrito só a partir do código público do
+  `ONLYOFFICE/web-apps`, e o cabeçalho indica o commit de referência de cada trecho. Hoje existe para
+  **documentos**.
+
+O `apply_mobile_ui` (`lib/common.sh`) copia o arquivo depois do `apply_patches web-apps`. Antes, confere que o stub da tag
+é o registrado em [`mobile-ui/upstream-stubs`](mobile-ui/upstream-stubs), para que o build pare se o upstream mudar o
+stub. Um editor ganha a interface quando ganha o próprio `mobile-ui/<editor>/patch.jsx`. Nesse momento, o trecho dele
+sai do `0001`.
+
+Não implementado no editor de documentos: os itens de numeração de lista do menu de toque ("Continuar numeração" e
+similares). As chaves de tradução existem, mas não há referência pública.
 
 ## Diferenças em relação ao builder do btactic
 
@@ -23,6 +47,8 @@ Mais nada é alterado: logo, marca, créditos, configuração, fontes e o restan
   commit.
 - **Patches como arquivos** em `patches/<repo>/`, aplicados com `git apply --check`/`git apply`. O original fazia
   cherry-pick de commits de repositórios de terceiros.
+- **Interface de edição mobile** (`mobile-ui/`), que o original não tinha: lá, o editor mobile ganhava a permissão de
+  editar, mas não os botões nem os painéis.
 - **Sem o patch de conexões** (desnecessário na 9.4) e **sem o Admin Panel**. O código do painel fica no repositório
   `ONLYOFFICE/server-admin-panel`, que não é público, e o patch do btactic só ligava o empacotamento dele.
 - **Compatível com o `build_tools` 9.4**, que prepara python/Qt/sysroot no `automate.py` e não mais no Dockerfile. O
@@ -56,7 +82,7 @@ A versão base fica no arquivo [`VERSION`](VERSION). Para descobrir o `BUILD_NUM
 # 2. imagem Docker ems-documentserver:<versão>.<build>-ems.<revisão>
 ./docker/build-image.sh
 
-# 3. teste rápido (healthcheck + edição mobile no bundle)
+# 3. teste rápido (healthcheck + edição e interface de edição mobile no bundle)
 ./tests/smoke.sh
 ```
 
@@ -71,6 +97,10 @@ Os roteiros manuais de validação estão em [`tests/mobile.md`](tests/mobile.md
 1. Atualizar `PRODUCT_VERSION`/`BUILD_NUMBER` em `VERSION` e voltar `EMS_REVISION` para `1`.
 2. `./onlyoffice-package-builder.sh`. O `work/` é limpo automaticamente ao trocar de versão.
    - Se um patch não aplicar, o build para e informa qual. Ajuste o arquivo em `patches/` na nova tag.
+   - Se o stub `lib/patch.jsx` de um editor com `mobile-ui/` mudar, o build para em `apply_mobile_ui`. Compare o stub
+     novo (`git -C work/web-apps show HEAD:apps/<editor>/mobile/src/lib/patch.jsx`) com o da tag anterior, revise o
+     `mobile-ui/<editor>/patch.jsx` contra os ganchos do código da nova tag e atualize o blob em
+     `mobile-ui/upstream-stubs`.
    - Se o upstream voltar a limitar conexões, o build para em `check_no_connection_limit`.
 3. `./docker/build-image.sh`, `./tests/smoke.sh` e os roteiros manuais.
 

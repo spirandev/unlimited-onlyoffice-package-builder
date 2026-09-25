@@ -1,0 +1,6 @@
+# Blob git do stub oficial apps/<editor>/mobile/src/lib/patch.jsx sobre o qual
+# mobile-ui/<editor>/patch.jsx foi escrito, na tag do VERSION. apply_mobile_ui
+# (lib/common.sh) só troca o arquivo se o blob da tag for este; se o upstream
+# mexer no stub, o build para e o nosso arquivo precisa ser revisto.
+# Para obter: git -C work/web-apps rev-parse HEAD:apps/<editor>/mobile/src/lib/patch.jsx
+documenteditor 20e4c14274d824afa6eccd3790e966dccc7c3a82

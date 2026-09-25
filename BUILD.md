@@ -198,11 +198,11 @@ cat VERSION
 ```
 PRODUCT_VERSION=9.4.0
 BUILD_NUMBER=129
-EMS_REVISION=1
+EMS_REVISION=2
 ```
 
 Isso gera a tag oficial `v9.4.0.129`, o pacote `onlyoffice-documentserver_9.4.0-129-ems_amd64.deb` e a imagem
-`ems-documentserver:9.4.0.129-ems.1`.
+`ems-documentserver:9.4.0.129-ems.2`.
 
 ## 4. Rodar o build
 
@@ -230,7 +230,9 @@ O que acontece, em ordem (cada linha `==>` do log corresponde a uma etapa):
    `server: HEAD 13142e41dfc9 confere com v9.4.0.129 oficial`.
 2. **Guarda de conexões:** confere que o `license.js` da versão não limita conexões
    (`server: license.js sem o limite de 20 conexões`).
-3. **Patches:** aplica `patches/web-apps/0001-enable-mobile-edit.patch` e mostra o `diff --stat` (3 arquivos, 3 linhas).
+3. **Patches:** aplica `patches/web-apps/0001-enable-mobile-edit.patch` e mostra o `diff --stat` (apresentação e
+   planilha, 2 linhas). Em seguida, `apply_mobile_ui` confere o stub e copia `mobile-ui/documenteditor/patch.jsx`
+   (`web-apps: mobile-ui/documenteditor/patch.jsx aplicado sobre o stub 20e4c14274d8`).
 4. **Imagem do build_tools** (`ems-oo-build-tools:v9.4.0.129`): rápida.
 5. **Compilação** (`compilando (módulo server). Isso leva horas.`): o `automate.py` do `build_tools` baixa Python,
    Qt, sysroot e CMake e instala os pacotes de sistema no container. Depois clona os demais repositórios oficiais
@@ -263,7 +265,7 @@ Clona o `Docker-DocumentServer` oficial na mesma tag e roda o `Dockerfile` dele,
 `.deb`, que é servido por um HTTP temporário em `127.0.0.1`. Ao final:
 
 ```
-==> [..] imagem pronta: ems-documentserver:9.4.0.129-ems.1
+==> [..] imagem pronta: ems-documentserver:9.4.0.129-ems.2
 ```
 
 Para usar outro nome de imagem (por exemplo, já com o registry): `./docker/build-image.sh --image=registry.exemplo/ems-documentserver`.
@@ -277,7 +279,7 @@ Para usar outro nome de imagem (por exemplo, já com o registry): `./docker/buil
 Sobe a imagem em `127.0.0.1:8099`, espera o healthcheck e confere o bundle dos editores mobile. Resultado esperado:
 
 ```
-Resultados (ems-documentserver:9.4.0.129-ems.1):
+Resultados (ems-documentserver:9.4.0.129-ems.2):
   OK    healthcheck responde true
   OK    api.js disponível
         documenteditor: isSupportEditFeature=()=>!0
@@ -286,10 +288,19 @@ Resultados (ems-documentserver:9.4.0.129-ems.1):
   OK    edição mobile liberada (apresentação)
         spreadsheeteditor: isSupportEditFeature=()=>!0
   OK    edição mobile liberada (planilha)
+        documenteditor: interface de edição presente
+  OK    interface de edição mobile (documento)
+        presentationeditor: falta:getToolbarOptions= falta:getUndoRedo= falta:\.intf= falta:getEditCommentControllers=
+  AVISO interface de edição mobile (apresentação) (editor ainda sem mobile-ui/presentationeditor/patch.jsx)
+        spreadsheeteditor: falta:toolbarOptions= falta:\.intf=
+  AVISO interface de edição mobile (planilha) (editor ainda sem mobile-ui/spreadsheeteditor/patch.jsx)
 ```
 
-`!0` é o `true` minificado. A imagem oficial mostra `()=>!1` e é reprovada, e isso já foi conferido. Se a porta 8099
-estiver ocupada: `./tests/smoke.sh ems-documentserver:9.4.0.129-ems.1 8199`.
+`!0` é o `true` minificado. A imagem oficial mostra `()=>!1` e é reprovada, e isso já foi conferido. A checagem da
+interface procura, no bundle, as atribuições que o `mobile-ui/<editor>/patch.jsx` faz. Na imagem oficial e na
+`-ems.1`, o documento mostra `stub:getToolbarOptions=\(\)=>null` e é reprovado. Apresentação e planilha só avisam
+enquanto não tiverem `mobile-ui/`. Se a porta 8099
+estiver ocupada: `./tests/smoke.sh ems-documentserver:9.4.0.129-ems.2 8199`.
 
 ## 5. Se o build falhar
 
@@ -304,6 +315,7 @@ disco.
 | `Killed`, `signal 9`, `c++: fatal error: Killed` | Falta de RAM | Fechar programas, criar swap (`sudo fallocate -l 8G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile`) e rodar de novo |
 | `HEAD ... difere da tag oficial` | O `work/<repo>` foi alterado à mão ou está corrompido | `--clean` e rodar de novo |
 | `0001-enable-mobile-edit.patch não aplica` | Versão nova mudou o arquivo | Refazer o patch na nova tag (seção 8) |
+| `o stub apps/<editor>/mobile/src/lib/patch.jsx mudou` | Versão nova mudou o stub que `mobile-ui/` substitui | Revisar o `mobile-ui/<editor>/patch.jsx` (seção 8) |
 | `license.js voltou a limitar conexões` | A versão escolhida é anterior à 9.4.0, ou o upstream voltou a limitar | Usar 9.4.0 ou mais nova, ou criar um patch em `patches/server/` |
 | `sem acesso ao Docker` | Usuário fora do grupo `docker` | Passo 2.2 |
 | Erro no `apt-get install /tmp/onlyoffice-documentserver_...deb` durante a etapa 2 | Dependência do `.deb` (gerado em Debian 13) ausente no Ubuntu 24.04 da imagem | Anotar o pacote que falta e reportar; a correção é trocar a base de `deb_build/Dockerfile-manual-debian-13` para `ubuntu:24.04` |
@@ -316,10 +328,10 @@ Os arquivos em `work/` são criados pelos containers como **root**. Para apagar 
 **Por arquivo** (sem registry):
 
 ```bash
-docker save ems-documentserver:9.4.0.129-ems.1 | gzip > ems-documentserver_9.4.0.129-ems.1.tar.gz
-scp ems-documentserver_9.4.0.129-ems.1.tar.gz usuario@destino:
+docker save ems-documentserver:9.4.0.129-ems.2 | gzip > ems-documentserver_9.4.0.129-ems.2.tar.gz
+scp ems-documentserver_9.4.0.129-ems.2.tar.gz usuario@destino:
 # no destino:
-gunzip -c ems-documentserver_9.4.0.129-ems.1.tar.gz | docker load
+gunzip -c ems-documentserver_9.4.0.129-ems.2.tar.gz | docker load
 ```
 
 No WSL2, o arquivo gerado em `~/` aparece no Explorer do Windows em `\\wsl$\Ubuntu-24.04\home\<usuário>\`. Outra opção
@@ -329,8 +341,8 @@ No WSL2, o arquivo gerado em `~/` aparece no Explorer do Windows em `\\wsl$\Ubun
 **Por registry:**
 
 ```bash
-docker tag ems-documentserver:9.4.0.129-ems.1 <registry>/ems-documentserver:9.4.0.129-ems.1
-docker push <registry>/ems-documentserver:9.4.0.129-ems.1
+docker tag ems-documentserver:9.4.0.129-ems.2 <registry>/ems-documentserver:9.4.0.129-ems.2
+docker push <registry>/ems-documentserver:9.4.0.129-ems.2
 ```
 
 Guarde também o `.deb` (`work/document-server-package/deb/*.deb`), porque ele permite gerar a imagem de novo sem
@@ -360,12 +372,21 @@ Lembrete: a 9.4 não usa mais RabbitMQ nem banco de dados. Revise as variáveis 
    ```bash
    cd work/web-apps
    git checkout .                # descarta tentativas anteriores
-   # editar apps/{document,presentation,spreadsheet}editor/mobile/src/lib/patch.jsx:
+   # editar apps/{presentation,spreadsheet}editor/mobile/src/lib/patch.jsx:
    #   isSupportEditFeature deve retornar true
    git diff > /tmp/novo.diff
    ```
    Substituir o bloco `diff` de `patches/web-apps/0001-enable-mobile-edit.patch` pelo novo (mantendo o cabeçalho de
-   texto), commitar e rodar de novo.
+   texto), commitar e rodar de novo. O editor de documentos não entra no `0001`: o arquivo dele vem de `mobile-ui/`.
+5. Se o build parar em `apply_mobile_ui` (o stub mudou), revisar o `mobile-ui/<editor>/patch.jsx`:
+   ```bash
+   cd work/web-apps
+   git show HEAD:apps/documenteditor/mobile/src/lib/patch.jsx   # stub novo
+   grep -rn "EditorUIController\.\|\.intf\b" apps/documenteditor/mobile/src   # ganchos que o código público consome
+   ```
+   Conferir se algum gancho mudou de nome ou de assinatura, ajustar o `.jsx`, atualizar o blob em
+   `mobile-ui/upstream-stubs` (`git rev-parse HEAD:apps/documenteditor/mobile/src/lib/patch.jsx`) e rodar de novo.
+   Depois do build, `./tests/smoke.sh` e o roteiro `tests/mobile.md` no celular.
 
 ## 9. Limpeza depois do build
 

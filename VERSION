@@ -4,4 +4,4 @@
 PRODUCT_VERSION=9.4.0
 BUILD_NUMBER=129
 # Revisão do nosso fork para a mesma versão oficial (imagem: <versão>-ems.<EMS_REVISION>).
-EMS_REVISION=1
+EMS_REVISION=2

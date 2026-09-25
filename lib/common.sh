@@ -12,6 +12,7 @@ UPSTREAM_GIT_BASE="https://github.com/ONLYOFFICE"
 BUILDER_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK_DIR="${WORK_DIR:-${BUILDER_ROOT}/work}"
 PATCHES_DIR="${BUILDER_ROOT}/patches"
+MOBILE_UI_DIR="${BUILDER_ROOT}/mobile-ui"
 
 log() {
   echo "==> [$(date +%H:%M:%S)] $*"
@@ -88,6 +89,34 @@ apply_patches() {
   done
   shopt -u nullglob
   git -C "${_dir}" --no-pager diff --stat
+}
+
+# Troca apps/<editor>/mobile/src/lib/patch.jsx do web-apps por
+# mobile-ui/<editor>/patch.jsx (a interface de edição mobile). Antes confere que o
+# stub da tag (blob em HEAD, sem depender do que já está no disco) é o de
+# mobile-ui/upstream-stubs: se o upstream mudar o stub, o build para. A cópia é
+# refeita a cada execução, então retomar o build é seguro.
+apply_mobile_ui() {
+  local _dir="${WORK_DIR}/web-apps" _stubs="${MOBILE_UI_DIR}/upstream-stubs"
+  local _src _editor _path _expected _actual
+  shopt -s nullglob
+  for _src in "${MOBILE_UI_DIR}"/*/patch.jsx; do
+    _editor="$(basename "$(dirname "${_src}")")"
+    _path="apps/${_editor}/mobile/src/lib/patch.jsx"
+    _expected="$(awk -v e="${_editor}" '$1 == e {print $2}' "${_stubs}")"
+    [ -n "${_expected}" ] || die "mobile-ui: ${_editor} sem blob em mobile-ui/upstream-stubs"
+    # um patch de patches/web-apps no mesmo arquivo seria sobrescrito aqui e
+    # quebraria a retomada (git apply --reverse --check falharia)
+    grep -rqs --include='*.patch' -e "^+++ b/${_path}$" "${PATCHES_DIR}/web-apps" \
+      && die "mobile-ui: ${_path} também é alterado por um patch de patches/web-apps; tire o trecho do patch"
+    _actual="$(git -C "${_dir}" rev-parse "HEAD:${_path}" 2>/dev/null)" \
+      || die "web-apps: ${_path} não existe em ${UPSTREAM_TAG}"
+    [ "${_actual}" == "${_expected}" ] \
+      || die "web-apps: o stub ${_path} mudou em ${UPSTREAM_TAG} (${_actual:0:12}, esperado ${_expected:0:12}); revise mobile-ui/${_editor}/patch.jsx e atualize mobile-ui/upstream-stubs"
+    cp "${_src}" "${_dir}/${_path}" || die "falha ao copiar mobile-ui/${_editor}/patch.jsx"
+    log "web-apps: mobile-ui/${_editor}/patch.jsx aplicado sobre o stub ${_expected:0:12}"
+  done
+  shopt -u nullglob
 }
 
 # A partir da 9.4.0 o upstream removeu o limite de 20 conexões do Community

@@ -23,7 +23,8 @@
 # Diferenças em relação ao builder original do btactic:
 # - todo código é clonado de github.com/ONLYOFFICE e o HEAD é conferido
 #   contra a tag oficial (nada vem de forks de terceiros);
-# - as alterações são arquivos em patches/<repo>/, aplicados com git apply;
+# - as alterações são arquivos em patches/<repo>/, aplicados com git apply, e a
+#   interface de edição mobile fica em mobile-ui/<editor>/patch.jsx;
 # - o build_tools da 9.4 prepara python/Qt/sysroot no automate.py (não mais
 #   no Dockerfile), por isso o build roda por ele;
 # - tudo fica em work/, que sobrevive entre execuções para retomar um build
@@ -111,6 +112,7 @@ build_oo_binaries() {
   check_no_connection_limit
   apply_patches server
   apply_patches web-apps
+  apply_mobile_ui
 
   # packages_complete marca que o deps.py instalou os pacotes do sistema. Os
   # pacotes vivem no container (descartado a cada execução), então a marca é

@@ -1,4 +1,4 @@
-Libera a edição nos editores mobile (documento, apresentação e planilha).
+Libera a edição nos editores mobile de apresentação e planilha.
 
 No Community, EditorUIController.isSupportEditFeature() retorna false e o editor
 mobile abre só em visualização (appOptions.canEdit depende desse valor). O build
@@ -6,44 +6,36 @@ oficial do Developer/Enterprise troca este arquivo pelo do repositório privado
 web-apps-mobile (vendor/framework7-react/build/webpack.config.js); aqui apenas
 passamos a retornar true.
 
+Isso libera a permissão, não a interface (botões Editar/Inserir, desfazer/refazer,
+painéis). O editor de documentos saiu deste patch: o arquivo inteiro dele é
+substituído por mobile-ui/documenteditor/patch.jsx, que também retorna true. Os
+demais editores saem daqui quando ganharem o próprio mobile-ui/<editor>/patch.jsx.
+
 Origem: btactic-oo/web-apps@140ef6d1d687532dcb03b05912838b8b4cf161a3,
 refeito sobre ONLYOFFICE/web-apps v9.4.0.129 (os arquivos ganharam cabeçalho
 de copyright e o contexto original deixou de aplicar).
 
-diff --git a/apps/documenteditor/mobile/src/lib/patch.jsx b/apps/documenteditor/mobile/src/lib/patch.jsx
-index 20e4c142..0da5007b 100644
---- a/apps/documenteditor/mobile/src/lib/patch.jsx
-+++ b/apps/documenteditor/mobile/src/lib/patch.jsx
-@@ -38,7 +38,7 @@ const EditorUIController = () => {
- };
- 
- EditorUIController.isSupportEditFeature = () => {
--    return false
-+    return true
- };
- 
- EditorUIController.getToolbarOptions = () => {
 diff --git a/apps/presentationeditor/mobile/src/lib/patch.jsx b/apps/presentationeditor/mobile/src/lib/patch.jsx
 index 8674f96f..cb73ad0a 100644
 --- a/apps/presentationeditor/mobile/src/lib/patch.jsx
 +++ b/apps/presentationeditor/mobile/src/lib/patch.jsx
 @@ -35,6 +35,6 @@
- 
+
  const EditorUIController = () => null;
- 
+
 -EditorUIController.isSupportEditFeature = () => false;
 +EditorUIController.isSupportEditFeature = () => true;
- 
+
  export default EditorUIController;
 diff --git a/apps/spreadsheeteditor/mobile/src/lib/patch.jsx b/apps/spreadsheeteditor/mobile/src/lib/patch.jsx
 index 8674f96f..cb73ad0a 100644
 --- a/apps/spreadsheeteditor/mobile/src/lib/patch.jsx
 +++ b/apps/spreadsheeteditor/mobile/src/lib/patch.jsx
 @@ -35,6 +35,6 @@
- 
+
  const EditorUIController = () => null;
- 
+
 -EditorUIController.isSupportEditFeature = () => false;
 +EditorUIController.isSupportEditFeature = () => true;
- 
+
  export default EditorUIController;
