@@ -3,3 +3,5 @@ work/
 # Caminhos usados pelo builder original do btactic.
 build_tools/
 deb_build/document-server-package/
+# Logs das execuções (build.log, image.log, smoke.log...).
+*.log

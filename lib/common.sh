@@ -132,6 +132,51 @@ check_no_connection_limit() {
   log "server: license.js sem o limite de 20 conexões"
 }
 
+# depot_tools fixado. O build_tools (v8_89.py, igual na 9.3.1 e na 9.4.0) clona
+# o master do depot_tools e fixa o Python do bootstrap em 3.8.10, mas desde
+# 3d401c263 (2025-11-21, "Caffeinate fetches on Mac") o fetch.py do master usa
+# argparse.BooleanOptionalAction (Python >= 3.9): o "fetch v8" falha calado e o
+# gclient sync dá "client not configured". DEPOT_TOOLS_PIN é o commit anterior,
+# o último que roda com 3.8.10. Só atualize quando o build_tools subir a versão
+# do Python em change_bootstrap().
+DEPOT_TOOLS_URL="https://chromium.googlesource.com/chromium/tools/depot_tools.git"
+DEPOT_TOOLS_PIN="b738decbefed1d63cc0238e4f3cac6665574f163"
+DEPOT_TOOLS_MIRROR="${WORK_DIR}/cache/depot_tools.git"
+V8_DIR="${WORK_DIR}/core/Common/3dParty/v8_89"
+
+# Mantém em ${DEPOT_TOOLS_MIRROR} um clone bare do depot_tools cujo main aponta
+# para ${DEPOT_TOOLS_PIN}. O docker run redireciona o git clone do build_tools
+# para ele (url.insteadOf), sem alterar o código do build_tools. Um depot_tools
+# que já esteja em work/ em outra revisão é apagado junto com o v8 baixado por
+# ele, porque o v8_89.py não clona de novo um diretório que já existe.
+prepare_depot_tools() {
+  local _head
+  if [ ! -d "${DEPOT_TOOLS_MIRROR}" ]; then
+    log "clonando o depot_tools (espelho local fixado)"
+    mkdir -p "$(dirname "${DEPOT_TOOLS_MIRROR}")"
+    git clone --quiet --bare "${DEPOT_TOOLS_URL}" "${DEPOT_TOOLS_MIRROR}" \
+      || die "falha ao clonar o depot_tools"
+  fi
+  if ! git -C "${DEPOT_TOOLS_MIRROR}" cat-file -e "${DEPOT_TOOLS_PIN}^{commit}" 2>/dev/null; then
+    git -C "${DEPOT_TOOLS_MIRROR}" fetch --quiet origin || die "falha ao atualizar o depot_tools"
+    git -C "${DEPOT_TOOLS_MIRROR}" cat-file -e "${DEPOT_TOOLS_PIN}^{commit}" \
+      || die "commit ${DEPOT_TOOLS_PIN} não existe no depot_tools"
+  fi
+  git -C "${DEPOT_TOOLS_MIRROR}" update-ref refs/heads/main "${DEPOT_TOOLS_PIN}"
+  git -C "${DEPOT_TOOLS_MIRROR}" symbolic-ref HEAD refs/heads/main
+
+  if [ -d "${V8_DIR}/depot_tools" ]; then
+    # os arquivos são do root (criados no container)
+    _head="$(git -c safe.directory='*' -C "${V8_DIR}/depot_tools" rev-parse HEAD 2>/dev/null)"
+    if [ "${_head}" != "${DEPOT_TOOLS_PIN}" ]; then
+      log "depot_tools em work/ está em ${_head:-revisão desconhecida}, apagando o v8_89 para clonar de novo"
+      docker run --rm -v "${WORK_DIR}:/w" ubuntu:24.04 rm -rf /w/core/Common/3dParty/v8_89 \
+        || die "falha ao apagar ${V8_DIR}"
+    fi
+  fi
+  log "depot_tools fixado em ${DEPOT_TOOLS_PIN:0:12}"
+}
+
 # Remove ${WORK_DIR} inteiro. Os arquivos gerados pelos containers pertencem ao
 # root, por isso a remoção é feita dentro de um container.
 wipe_work_dir() {

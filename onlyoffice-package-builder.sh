@@ -113,6 +113,7 @@ build_oo_binaries() {
   apply_patches server
   apply_patches web-apps
   apply_mobile_ui
+  prepare_depot_tools
 
   # packages_complete marca que o deps.py instalou os pacotes do sistema. Os
   # pacotes vivem no container (descartado a cada execução), então a marca é
@@ -120,23 +121,53 @@ build_oo_binaries() {
   # work/build_tools e são reaproveitados.
   rm -f "${WORK_DIR}/build_tools/tools/linux/packages_complete"
 
+  # Contexto vazio: o ADD . do Dockerfile não é usado (work/ é montado no
+  # docker run) e, a partir da segunda execução, work/build_tools tem o sysroot
+  # baixado pelo container, com diretórios do root que o docker build não lê.
+  # O /build_tools da imagem fica vazio, o que não importa: o docker run usa
+  # -w /work/build_tools/tools/linux. O diretório temporário é apagado nos dois
+  # caminhos (sucesso e falha).
   log "gerando a imagem do build_tools"
-  docker build --tag "ems-oo-build-tools:${UPSTREAM_TAG}" "${WORK_DIR}/build_tools" \
-    || die "falha no docker build do build_tools"
+  local empty_ctx
+  empty_ctx="$(mktemp -d)"
+  docker build --tag "ems-oo-build-tools:${UPSTREAM_TAG}" \
+    -f "${WORK_DIR}/build_tools/Dockerfile" "${empty_ctx}" \
+    || { rmdir "${empty_ctx}"; die "falha no docker build do build_tools"; }
+  rmdir "${empty_ctx}"
 
   # work/ é montado inteiro: os repositórios que o build_tools clona (core,
   # sdkjs, ...) ficam ao lado de server/ e web-apps/ e persistem entre execuções.
-  # O container roda como root sobre repositórios do usuário: safe.directory
-  # evita a recusa do git por "dubious ownership".
+  # server/ e web-apps/ são clonados pelo usuário e o container roda como root,
+  # então o git do container os recusa por "dubious ownership". Isso é
+  # desejável: o build_tools não mexe nesses dois repositórios, que ficam
+  # exatamente no estado verificado por clone_official e com os patches
+  # aplicados. Por isso não há safe.directory='*' aqui (o git nem existe no
+  # container quando o comando começa; quem instala é o deps.py).
+  # DEPOT_TOOLS_DIR absoluto: o v8_89.py chama ./depot_tools/fetch com caminho
+  # relativo, e o depot_tools exporta esse caminho e
+  # depois faz cd para dentro dele antes de rodar ./cipd, que então procura
+  # depot_tools/depot_tools/cipd_client_version.digests ("Platform linux-amd64
+  # is not supported by CIPD client bootstrap"). Como todos os scripts usam
+  # ${DEPOT_TOOLS_DIR:-...}, o valor fixado aqui vence. O caminho acompanha o
+  # ponto de montagem /work abaixo: se ele mudar, ajuste os dois.
+  # depot_tools fixado: o /root/.gitconfig do container redireciona o git clone
+  # do depot_tools feito pelo v8_89.py para o espelho em work/cache (ver
+  # prepare_depot_tools em lib/common.sh), e DEPOT_TOOLS_UPDATE=0 impede o
+  # depot_tools de se atualizar sozinho. O arquivo é escrito com printf porque
+  # o git só é instalado depois, pelo deps.py. Precisa ser a config global
+  # (não GIT_CONFIG_*), porque o upload-pack do clone local não herda essas
+  # variáveis e recusaria o espelho, que é do usuário, por "dubious ownership".
   log "compilando (módulo server). Isso leva horas."
   docker run --rm \
     -e PRODUCT_VERSION="${PRODUCT_VERSION}" \
     -e BUILD_NUMBER="${BUILD_NUMBER}" \
     -e NODE_ENV='production' \
+    -e DEPOT_TOOLS_DIR=/work/core/Common/3dParty/v8_89/depot_tools \
+    -e DEPOT_TOOLS_UPDATE=0 \
     -v "${WORK_DIR}:/work" \
     -w /work/build_tools/tools/linux \
     "ems-oo-build-tools:${UPSTREAM_TAG}" \
-    /bin/bash -c "git config --global --add safe.directory '*' 2>/dev/null || true; \
+    /bin/bash -c "printf '[safe]\\n\\tdirectory = /work/cache/depot_tools.git\\n[url \"/work/cache/depot_tools.git\"]\\n\\tinsteadOf = ${DEPOT_TOOLS_URL}\\n' >> /root/.gitconfig; \
       python3 ./automate.py server --branch=tags/${UPSTREAM_TAG} --update-light=1 --clean=0" \
     || die "falha no build_tools"
 
